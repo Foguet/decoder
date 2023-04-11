@@ -41,16 +41,109 @@ Each device must provide a `brand`, `model`, `model_id`, `condition`, and `prope
 - `model` = model name of the device.
 - `model_id` = model id number of the device.
 
-#### Manufacturer ID Compliance
-Whenever a decoder is based on "manufacturerdata" and the first bytes do not comply with the [Bluetooth SIG's company identifier convention](https://www.bluetooth.com/specifications/assigned-numbers/company-identifiers/), an additional device property `"cidc"` should be added to the decoder, set to false.
+### Tag property
+Each device should also have an encoded **tag** property to, at the minimum, define the device type for a decoder, and additionally define other descriptive properties to be published. This enables projects to adjust their display and scanning behaviour accordingly.
+
+<table>
+    <thead>
+        <tr>
+            <th colspan=3>tag encoding</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td rowspan=20>Byte[0]</td>
+            <td rowspan=20>Device Type > "type":</td>
+            <td rowspan=1>0 - Reserved</td>
+        </tr>
+        <tr>
+            <td rowspan=1>1 - THB - temperature, humidity, battery<</td>
+        </tr>
+        <tr>
+            <td rowspan=1>2 - THBX - temperature, humidity, battery, extras</td>
+        </tr>
+        <tr>
+            <td rowspan=1>3 - BBQ - temperatures with several probes</td>
+        </tr>
+        <tr>
+            <td rowspan=1>4 - CTMO - contact and/or motion sensors</td>
+        </tr>
+        <tr>
+            <td rowspan=1>5 - SCALE - weight scales</td>
+        </tr>
+        <tr>
+            <td rowspan=1>6 - BCON - iBeacon protocol</td>
+        </tr>
+        <tr>
+            <td rowspan=1>7 - ACEL - acceleration</td>
+        </tr>
+        <tr>
+            <td rowspan=1>8 - BATT - battery</td>
+        </tr>
+        <tr>
+            <td rowspan=1>9 - PLANT - plant sensors</td>
+        </tr>
+        <tr>
+            <td rowspan=1>10 - TIRE - tire pressure monitoring system</td>
+        </tr>
+        <tr>
+            <td rowspan=1>11 - BODY - health monitoring devices</td>
+        </tr>
+        <tr>
+            <td rowspan=1>12 - ENRG - energy monitoring devices</td>
+        </tr>
+        <tr>
+            <td rowspan=1>13 - WCVR - window covering devices</td>
+        </tr>
+        <tr>
+            <td rowspan=1>14 - ACTR - ON/OFF actuators</td>
+        </tr>
+        <tr>
+            <td rowspan=1>15 - AIR - air environmental monitoring devices</td>
+        </tr>
+        <tr>
+            <td rowspan=1>16 - TRACK - bluetooth tracker</td>
+        </tr>
+        <tr>
+            <td rowspan=1>17-253 - Reserved</td>
+        </tr>
+        <tr>
+            <td rowspan=1>254 - RMAC - known random MAC address devices</td>
+        </tr>
+        <tr>
+            <td rowspan=1>255 - UNIQ - unique devices</td>
+        </tr>
+		<tr>
+            <td rowspan=8>Byte[1]</td>
+            <td rowspan=8>Additional properties</td>
+            <td rowspan=1>Bits[7-4] - Reserved</td>
+        </tr>
+        <tr>
+            <td rowspan=1>Bit[3] Device compatible with presence tracking > "track":</td>
+        </tr>
+        <tr>
+            <td rowspan=1>Bit[2] Requires continuous scanning > "cont":</td>
+        </tr>
+        <tr>
+            <td rowspan=1>Bit[1] Requires active scanning > "acts":</td>
+        </tr>
+        <tr>
+            <td rowspan=1>Bit[0] Is NOT Company ID compliant > "cidc":</td>
+        </tr>
+    </tbody>
+</table>
+
+**cidc** - Whenever a decoder is based on "manufacturerdata" and the first bytes do not comply with the [Bluetooth SIG's company identifier convention](https://www.bluetooth.com/specifications/assigned-numbers/company-identifiers/), this should be set to 1/true, to then produce "cidc":false in the published message.
 
 ```
-   "brand":"Govee",
-   "model":"Thermo Hygrometer",
-   "model_id":"H5072",
-   "cidc":false,
+   "brand":"Otio/BeeWi",
+   "model":"Door & Window Sensor",
+   "model_id":"BSDOO",
+   "tag":"0405",
    …
 ```
+
+will have `… "type":"CTMO","cidc":false,"cont":true …` in the published message.
 
 ### Condition
 `condition` is a JSON array, which must contain as the first parameter, the data source to test for the condition. Valid inputs are:
@@ -62,12 +155,18 @@ Whenever a decoder is based on "manufacturerdata" and the first bytes do not com
 The second parameter is variable. If required, further qualification can be made by setting a conditional data length in the case of "servicedata" or "manufacturerdata" as the first condition. This is an operator in the form of `">" , ">=" , "=" , "<" , "<="` followed by the third parameter being a numeric value that specifies the length of the data to accept. If no data length is defined the second parameter must indicate how the data should be tested. Valid inputs are:
 - "contain" tests if the specified value (see below) exists the data source 
 - "index" tests if the specified value exists at the index location (see below) in the data source
+- "mac@index" tests if the device's MAC address exists at the index location (see below) in the data source
+- "revmac@index" tests if the device's MAC address exists octet-reversed at the index location (see below) in the data source
+
+::: warning Note
+For compatibility of a decoder for running successfully on an OS which masks the real MAC addresses of devices by generic uuids, like macOS and iOS, an alternative model condition with the name "conditionnomac" needs to be defined in addition to "condition" if the latter contains "mac@index" or "revmac@index".
+:::
 
 Examples:
 `"condition":["servicedata", "index", 0, "0804"` -- no data length check
 `"condition":["servicedata", ">=", 40, "index", 0, "0804"` -- data length must be equal to or greater than 40 bytes
 
-The third parameter (fifth if data length is specified) can be either the index value or the data value to find. If the second (fourth if data length specified) parameter is `contain`, the next parameter should be the value to look for in the data source. If the second (fourth if data length specified) parameter is `index`, the next parameter should be the location in the data source to look for the value.
+The third parameter (fifth if data length is specified) can be either the index value or the data value to find. If the second (fourth if data length specified) parameter is `contain`, the next parameter should be the value to look for in the data source. If the second (fourth if data length specified) parameter is `index`, `mac@index` or `revmac@index` the next parameter should be the location in the data source to look for the value.
 
 `condition` can have multiple conditions chained together using "|" and "&" between them.  
 For example: `"condition":["servicedata", "index", 0, "0804", "|", "servicedata", "index", 0, "8804"]`  
@@ -158,7 +257,7 @@ Property conditions also allow for a NOT comparison, as in
 where then the fourth parameter is the value to test for.
 
 ::: warning Note
-The NOT comparison is case sensitive! Therefor any NOT comparisons should be defined in lower case, as this is the format in which devices' "servicedata" and "manufacturerdata" are being reported.
+The NOT comparison is case sensitive! Therefore any NOT comparisons should be defined in lower case, as this is the format in which devices' "servicedata" and "manufacturerdata" are being reported.
 :::
 
 `decoder` is a JSON array that specifies the decoder function and parameters to decode the value.
@@ -204,6 +303,8 @@ Valid operations are:
 - ">" shift right
 - "!" Not (invert), useful for bool types
 - "&" Logical And the values
+- "min" the minimum allowed value
+- "max" the maximum allowed value
 
 #### Special property .cal
 .cal is a special property that can extracted from the provided data and used in calculations of other properties following it's definition. For example:

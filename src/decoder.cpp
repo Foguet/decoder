@@ -28,9 +28,11 @@
 
 #ifdef DEBUG_DECODER
 #  include <stdio.h>
-#  define DEBUG_PRINT printf
+#  define DEBUG_PRINT(...) \
+    { printf(__VA_ARGS__); }
 #else
-#  define DEBUG_PRINT
+#  define DEBUG_PRINT(...) \
+    {}
 #endif
 
 #ifdef UNIT_TESTING
@@ -97,11 +99,11 @@ double TheengsDecoder::value_from_hex_string(const char* data_str,
 
   double value = 0;
   if (!isFloat) {
-    value = strtol(data.c_str(), NULL, 16);
-    DEBUG_PRINT("extracted value from %s = 0x%08lx\n", data.c_str(), (long)value);
+    value = strtoll(data.c_str(), NULL, 16);
+    DEBUG_PRINT("extracted value from %s = %lld\n", data.c_str(), (long long)value);
   } else {
     long longV = strtol(data.c_str(), NULL, 16);
-    float floatV = *((float *) &longV);
+    float floatV = *((float*)&longV);
     DEBUG_PRINT("extracted float value from %s = %f\n", data.c_str(), floatV);
     value = floatV;
   }
@@ -140,7 +142,7 @@ bool TheengsDecoder::data_index_is_valid(const char* str, size_t index, size_t l
 }
 
 bool TheengsDecoder::data_length_is_valid(size_t data_len, size_t default_min,
-                                         const JsonArray& condition, int *idx) {
+                                          const JsonArray& condition, int* idx) {
   std::string op = condition[*idx + 1].as<std::string>();
   if (!op.empty() && op.length() > 2) {
     return (data_len >= default_min);
@@ -181,14 +183,15 @@ bool TheengsDecoder::checkDeviceMatch(const JsonArray& condition,
                                       const char* svc_data,
                                       const char* mfg_data,
                                       const char* dev_name,
-                                      const char* svc_uuid) {
+                                      const char* svc_uuid,
+                                      const char* mac_id) {
   bool match = false;
   int cond_size = condition.size();
 
   for (int i = 0; i < cond_size;) {
     if (condition[i].is<JsonArray>()) {
       DEBUG_PRINT("found nested array\n");
-      match = checkDeviceMatch(condition[i], svc_data, mfg_data, dev_name, svc_uuid);
+      match = checkDeviceMatch(condition[i], svc_data, mfg_data, dev_name, svc_uuid, mac_id);
 
       if (++i < cond_size) {
         if (!match && *condition[i].as<const char*>() == '|') {
@@ -260,6 +263,49 @@ bool TheengsDecoder::checkDeviceMatch(const JsonArray& condition,
           match = false; // (strstr(cond_str, "not_") != nullptr) ? true : false;
         }
         i++;
+      } else if (strstr(cond_str, "mac@index") != nullptr) {
+        size_t cond_index = condition[++i].as<size_t>();
+        size_t cond_len = 12;
+        const char* string_to_compare = nullptr;
+        std::string mac_string = mac_id;
+
+        // remove colons and make lower case
+        for (int x = 0; x < mac_string.length(); x++) {
+          if (mac_string[x] == ':') {
+            mac_string.erase(x, 1);
+          }
+          mac_string[x] = tolower(mac_string[x]);
+        }
+
+        string_to_compare = mac_string.c_str();
+
+        if (strstr(cond_str, "revmac@index") != nullptr) {
+          char* reverse_mac_string = (char*)malloc(strlen(string_to_compare) + 1);
+
+          reverse_hex_data(string_to_compare, reverse_mac_string, 12);
+          string_to_compare = reverse_mac_string;
+        }
+
+        if (!data_index_is_valid(cmp_str, cond_index, cond_len)) {
+          DEBUG_PRINT("Invalid data %s; skipping\n", cmp_str);
+          match = false;
+          break;
+        }
+
+        DEBUG_PRINT("comparing value: %s to %s at index %zu\n",
+                    &cmp_str[cond_index],
+                    string_to_compare,
+                    cond_index);
+
+        if (strncmp(&cmp_str[cond_index],
+                    string_to_compare,
+                    12) == 0) {
+          match = true;
+        } else {
+          match = false;
+        }
+
+        i++;
       } else if (strstr(cond_str, "index") != nullptr) {
         size_t cond_index = condition[++i].as<size_t>();
         size_t cond_len = strlen(condition[++i].as<const char*>());
@@ -276,7 +322,7 @@ bool TheengsDecoder::checkDeviceMatch(const JsonArray& condition,
           i++;
         }
 
-        DEBUG_PRINT("comparing value: %s to %s at index %lu\n",
+        DEBUG_PRINT("comparing value: %s to %s at index %zu\n",
                     &cmp_str[cond_index],
                     condition[i].as<const char*>(),
                     cond_index);
@@ -373,10 +419,10 @@ bool TheengsDecoder::checkPropCondition(const JsonArray& prop_condition,
             }
             i += 2;
           } else if (!strncmp(&data_src[prop_condition[i + 1].as<int>()],
-                      prop_condition[i + 2 + inverse].as<const char*>(), cond_len)) {
+                              prop_condition[i + 2 + inverse].as<const char*>(), cond_len)) {
             cond_met = inverse ? false : true;
           } else if (strncmp(&data_src[prop_condition[i + 1].as<int>()],
-                      prop_condition[i + 2 + inverse].as<const char*>(), cond_len)) {
+                             prop_condition[i + 2 + inverse].as<const char*>(), cond_len)) {
             cond_met = inverse ? true : false;
           }
         } else {
@@ -423,10 +469,11 @@ int TheengsDecoder::decodeBLEJson(JsonObject& jsondata) {
   const char* mfg_data = jsondata[MFG_DATA].as<const char*>();
   const char* dev_name = jsondata["name"].as<const char*>();
   const char* svc_uuid = jsondata["servicedatauuid"].as<const char*>();
+  const char* mac_id = jsondata["id"].as<const char*>();
   int success = -1;
 
   // if there is no data to decode just return
-  if (svc_data == nullptr && mfg_data == nullptr) {
+  if (svc_data == nullptr && mfg_data == nullptr && dev_name == nullptr) {
     DEBUG_PRINT("Invalid data\n");
     return success;
   }
@@ -447,12 +494,118 @@ int TheengsDecoder::decodeBLEJson(JsonObject& jsondata) {
 #endif
 
     /* found a match, extract the data */
-    if (checkDeviceMatch(doc["condition"], svc_data, mfg_data, dev_name, svc_uuid)) {
+    JsonArray selectedCondition;
+#ifdef NO_MAC_ADDR
+    if (doc.containsKey("conditionnomac")) {
+      selectedCondition = doc["conditionnomac"];
+    } else {
+      selectedCondition = doc["condition"];
+    }
+#else
+    selectedCondition = doc["condition"];
+#endif
+    if (checkDeviceMatch(selectedCondition, svc_data, mfg_data, dev_name, svc_uuid, mac_id)) {
       jsondata["brand"] = doc["brand"];
       jsondata["model"] = doc["model"];
       jsondata["model_id"] = doc["model_id"];
-      if (doc.containsKey("cidc")) {
-        jsondata["cidc"] = doc["cidc"];
+      if (doc.containsKey("tag")) {
+        doc.add("type");
+        doc["type"] = NULL;
+
+        std::string tagstring = doc["tag"];
+        int type = strtol(tagstring.substr(0, 2).c_str(), NULL, 16);
+
+        switch (type) {
+          case 1:
+            doc["type"] = "THB"; // Termperature, Humidity, Battery
+            break;
+          case 2:
+            doc["type"] = "THBX"; // Termperature, Humidity, Battery, Extra
+            break;
+          case 3:
+            doc["type"] = "BBQ"; // Multip probe temperatures only
+            break;
+          case 4:
+            doc["type"] = "CTMO"; // Contact and/or Motion sensor
+            break;
+          case 5:
+            doc["type"] = "SCALE"; // weight scale
+            break;
+          case 6:
+            doc["type"] = "BCON"; // iBeacon protocol
+            break;
+          case 7:
+            doc["type"] = "ACEL"; // acceleration
+            break;
+          case 8:
+            doc["type"] = "BATT"; // battery
+            break;
+          case 9:
+            doc["type"] = "PLANT"; // plant sensors
+            break;
+          case 10:
+            doc["type"] = "TIRE"; // tire pressure monitoring system
+            break;
+          case 11:
+            doc["type"] = "BODY"; // health monitoring devices
+            break;
+          case 12:
+            doc["type"] = "ENRG"; // energy monitoring devices
+            break;
+          case 13:
+            doc["type"] = "WCVR"; // window covering
+            break;
+          case 14:
+            doc["type"] = "ACTR"; // ON/OFF actuators
+            break;
+          case 15:
+            doc["type"] = "AIR"; // air environmental monitoring devices
+            break;
+          case 16:
+            doc["type"] = "TRACK"; // Bluetooth tracker
+            break;
+          case 254:
+            doc["type"] = "RMAC"; // random MAC address devices
+            break;
+          case 255:
+            doc["type"] = "UNIQ"; // unique devices
+            break;
+        }
+
+        if (!doc["type"].isNull()) {
+          jsondata["type"] = doc["type"];
+        } else {
+          DEBUG_PRINT("ERROR - no valid device type present in model tag property\n");
+        }
+
+        // Octet Byte[1] bits[7-0] - True/False tags
+        if (tagstring.length() >= 4) { // bits[3-0]
+          uint8_t data = getBinaryData(tagstring[3]);
+
+          if (((data >> 0) & 0x01) == 1) { // CIDC - NOT Company ID Compliant
+            doc.add("cidc");
+            doc["cidc"] = false;
+            jsondata["cidc"] = doc["cidc"];
+          }
+
+          if (((data >> 1) & 0x01) == 1) { // Active Scanning required
+            doc.add("acts");
+            doc["acts"] = true;
+            jsondata["acts"] = doc["acts"];
+          }
+
+          if (((data >> 2) & 0x01) == 1) { // Continuous Scanning required
+            doc.add("cont");
+            doc["cont"] = true;
+            jsondata["cont"] = doc["cont"];
+          }
+
+          if (((data >> 3) & 0x01) == 1) { // Presence tracking conpatible
+            doc.add("track");
+            doc["track"] = true;
+            jsondata["track"] = doc["track"];
+          }
+        }
       }
 
       JsonObject properties = doc["properties"];
@@ -511,43 +664,53 @@ int TheengsDecoder::decodeBLEJson(JsonObject& jsondata) {
                       break;
                   }
                 } else {
-                  switch (*post_proc[i].as<const char*>()) {
-                    case '/':
-                      temp_val /= post_proc[i + 1].as<double>();
-                      break;
-                    case '*':
-                      temp_val *= post_proc[i + 1].as<double>();
-                      break;
-                    case '-':
-                      temp_val -= post_proc[i + 1].as<double>();
-                      break;
-                    case '+':
-                      temp_val += post_proc[i + 1].as<double>();
-                      break;
-                    case '%': {
-                      long val = (long)temp_val;
-                      temp_val = val % post_proc[i + 1].as<long>();
-                      break;
+                  if (strlen(post_proc[i].as<const char*>()) == 1) {
+                    switch (*post_proc[i].as<const char*>()) {
+                      case '/':
+                        temp_val /= post_proc[i + 1].as<double>();
+                        break;
+                      case '*':
+                        temp_val *= post_proc[i + 1].as<double>();
+                        break;
+                      case '-':
+                        temp_val -= post_proc[i + 1].as<double>();
+                        break;
+                      case '+':
+                        temp_val += post_proc[i + 1].as<double>();
+                        break;
+                      case '%': {
+                        long val = (long)temp_val;
+                        temp_val = val % post_proc[i + 1].as<long>();
+                        break;
+                      }
+                      case '<': {
+                        long val = (long)temp_val;
+                        temp_val = val << post_proc[i + 1].as<unsigned int>();
+                        break;
+                      }
+                      case '>': {
+                        long val = (long)temp_val;
+                        temp_val = val >> post_proc[i + 1].as<unsigned int>();
+                        break;
+                      }
+                      case '!': {
+                        bool val = (bool)temp_val;
+                        temp_val = !val;
+                        break;
+                      }
+                      case '&': {
+                        long long val = (long long)temp_val;
+                        temp_val = val & post_proc[i + 1].as<unsigned int>();
+                        break;
+                      }
                     }
-                    case '<': {
-                      long val = (long)temp_val;
-                      temp_val = val << post_proc[i + 1].as<unsigned int>();
-                      break;
+                  } else if (strncmp(post_proc[i].as<const char*>(), "max", 3) == 0) {
+                    if (temp_val > post_proc[i + 1].as<double>()) {
+                      temp_val = post_proc[i + 1].as<double>();
                     }
-                    case '>': {
-                      long val = (long)temp_val;
-                      temp_val = val >> post_proc[i + 1].as<unsigned int>();
-                      break;
-                    }
-                    case '!': {
-                      bool val = (bool)temp_val;
-                      temp_val = !val;
-                      break;
-                    }
-                    case '&': {
-                      long val = (long)temp_val;
-                      temp_val = val & post_proc[i + 1].as<unsigned int>();
-                      break;
+                  } else if (strncmp(post_proc[i].as<const char*>(), "min", 3) == 0) {
+                    if (temp_val < post_proc[i + 1].as<double>()) {
+                      temp_val = post_proc[i + 1].as<double>();
                     }
                   }
                 }
@@ -559,15 +722,15 @@ int TheengsDecoder::decodeBLEJson(JsonObject& jsondata) {
                 */
             std::string _key = sanitizeJsonKey(kv.key().c_str());
 
-            /* calculation values extracted from data are not added to the deocded outupt
-                * instead we store them teporarily to use with the next data properties.
+            /* calculation values extracted from data are not added to the decoded output
+                * instead we store them temporarily to use with the next data properties.
                 */
             if (_key == ".cal") {
               cal_val = temp_val;
               continue;
             }
 
-            /* Cast to a differnt value type if specified */
+            /* Cast to a different value type if specified */
             if (prop.containsKey("is_bool")) {
               jsondata[_key] = (bool)temp_val;
             } else {
@@ -580,6 +743,14 @@ int TheengsDecoder::decodeBLEJson(JsonObject& jsondata) {
               _key[4] = 'f';
               jsondata[_key] = tc * 1.8 + 32;
               _key[4] = 'c';
+            }
+
+            /* If the property is with suffix _cm, make sure to convert and add length in inches */
+            if (_key.find("_cm", _key.length() - 3, 3) != std::string::npos) {
+              double tc = jsondata[_key];
+              _key.replace(_key.length() - 3, 3, "_in");
+              jsondata[_key] = tc / 2.54;
+              _key.replace(_key.length() - 3, 3, "_cm");
             }
 
             success = i_main;

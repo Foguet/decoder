@@ -56,11 +56,14 @@ public:
     CGG1_STOCK_2,
     CGDN1,
     CGD1,
-    CGDK2,
+    CGDK2_STOCK,
+    CGDK2_PVVX,
+    CGDK2_ATC1441,
     CGH1,
     JQJCY01YM,
-    IBSTH1,
-    IBSTH2,
+    IBSTHBP01B,
+    IBT_2X,
+    IBT_2XS,
     IBT4XS,
     IBT6XS_SOLIS,
     MIBAND,
@@ -68,18 +71,19 @@ public:
     XMTZC05HM,
     TPMS,
     LYWSD03MMC_ATC,
+    LYWSD03MMC_PVVX,
     CGPR1,
     THERMOBEACON,
     H5055,
-    H5075,
     H5072,
+    H5074,
     H5102,
-    LYWSD03MMC_PVVX,
+    H5106,
+    HHCCJCY10,
     MUE4094RT,
     MOKOBEACON,
     MOKOBEACONXPRO,
     INODEEM,
-    IBT_2X,
     RUUVITAG_RAWV1,
     RUUVITAG_RAWV2,
     SBCS,
@@ -87,8 +91,14 @@ public:
     SBMS,
     SBMT,
     SBS1,
+    SHT4X,
+    SCD4X,
+    SKALE,
     SMARTDRY,
-    BM_V23,
+    BC08,
+    BM1IN1,
+    BM3IN1,
+    BM4IN1,
     MS_CDP,
     GAEN,
     HHCCPOT002,
@@ -99,9 +109,20 @@ public:
     ABN03,
     ABTEMP,
     AMPHIRO,
-    TP35X,
+    PH10,
+    TPTH,
+    MOPEKA,
+    T201,
     T301,
+    NUT,
+    ITAG,
+    TAGIT,
+    TILE,
+    TILEN,
+    JHT_F525,
     IBEACON,
+    APPLE_CONT,
+    APPLE_CONTAT,
     SERVICE_DATA,
     BLE_ID_MAX
   };
@@ -116,10 +137,10 @@ private:
   bool        evaluateDatalength(std::string op, size_t data_len, size_t req_len);
   bool        checkPropCondition(const JsonArray& prop, const char* svc_data, const char* mfg_data);
   bool        checkDeviceMatch(const JsonArray& condition, const char* svc_data, const char* mfg_data,
-                               const char* dev_name, const char* svc_uuid);
+                               const char* dev_name, const char* svc_uuid, const char* mac_id);
   std::string sanitizeJsonKey(const char* key_in);
 
-  size_t m_docMax = 11500;
+  size_t m_docMax = 12000;
   size_t m_minSvcDataLen = 20;
   size_t m_minMfgDataLen = 16;
 };
